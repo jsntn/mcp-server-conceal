@@ -13,7 +13,6 @@ phone = "\\b(?:\\+?1[-\\.\\s]?)?(?:\\(?[0-9]{3}\\)?[-\\.\\s]?)?[0-9]{3}[-\\.\\s]
 ssn = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
 credit_card = "\\b\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b"
 ip_address = "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b"
-url = "https?://[^\\s/$.?#].[^\\s]*"
 
 [faker]
 locale = "en_US"
@@ -22,16 +21,19 @@ consistency = true
 
 [mapping]
 database_path = "mappings.db"
+encryption = false
 retention_days = 90
 
-[deanonymize]
-enabled = true        # Enable de-anonymization of AI responses
-
 [llm]
+enabled = true
 model = "qwen2.5:1.5b-instruct-q4_K_M"
 endpoint = "http://localhost:11434"
 timeout_seconds = 60
-prompt_template = "default"
+# Prompt template selection:
+#   "simple"   - lightweight, works with 1.5B+ models (default if omitted)
+#   "detailed" - comprehensive with hostname/node detection, requires 3B+ models
+#   "<name>"   - custom template from ~/.local/share/mcp-server-conceal/prompts/<name>.md
+prompt_template = "simple"
 
 [llm_cache]
 enabled = true
