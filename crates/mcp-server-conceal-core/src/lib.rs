@@ -7,6 +7,7 @@ pub mod faker;
 pub mod mapping;
 pub mod ollama;
 pub mod prompt_loader;
+pub mod server;
 
 #[cfg(test)]
 pub mod integration_tests;
