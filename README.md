@@ -1,37 +1,54 @@
 # MCP Conceal
 
-An MCP proxy that pseudo-anonymizes PII before data reaches external AI providers and **de-anonymizes responses** so you see real values.
+An MCP privacy tool that pseudo-anonymizes PII and de-anonymizes responses. Runs as a **standalone MCP server** or as a **proxy** in front of another MCP server.
 
 ```mermaid
 sequenceDiagram
     participant U as You
     participant P as MCP Conceal
-    participant S as Your MCP Server
     participant AI as AI Provider
     
-    U->>P: Request with real PII
-    P->>P: Detect & Anonymize PII
-    P->>S: Request with fake PII
-    S->>P: Response with fake PII
-    P->>P: De-anonymize (fake→real)
-    P->>U: Response with real PII restored
+    U->>P: privacy_anonymize("email john@real.com")
+    P->>P: Detect PII → Replace with fake
+    P->>U: "email mike@fake.org"
+    Note over U,AI: You send anonymized text to AI
+    AI->>U: "I emailed mike@fake.org"
+    U->>P: privacy_deanonymize("I emailed mike@fake.org")
+    P->>P: Reverse lookup → Restore real
+    P->>U: "I emailed john@real.com"
 ```
 
-MCP Conceal performs pseudo-anonymization rather than redaction to preserve semantic meaning and data relationships required for AI analysis. Example: `john.smith@acme.com` becomes `tomas@example.org`, maintaining structure while protecting sensitive information. Responses are automatically de-anonymized before reaching you.
+## Two Modes
 
-## Quick Start
+### Standalone MCP Server (recommended for MCP clients)
 
-### Prerequisites
+Exposes privacy tools directly:
 
-Install Ollama for LLM-based PII detection:
+```bash
+mcp-server-conceal --mode server --keep-database
+```
 
-1. Install Ollama: [ollama.ai](https://ollama.ai)
-2. Pull model: `ollama pull qwen2.5:1.5b-instruct-q4_K_M`
-3. Verify: `curl http://localhost:11434/api/version`
+**Tools exposed:**
+- `privacy_anonymize(text)` — detect and replace PII with fake values
+- `privacy_deanonymize(text)` — restore original values from fakes
+- `privacy_status` — show mapping statistics
 
-### Basic Usage
+**MCP client config (e.g., kiro-cli, Claude Desktop):**
 
-Run as proxy in front of any MCP server:
+```json
+{
+  "mcpServers": {
+    "conceal": {
+      "command": "mcp-server-conceal",
+      "args": ["--mode", "server", "--keep-database"]
+    }
+  }
+}
+```
+
+### Proxy Mode (wraps another MCP server)
+
+Transparently anonymizes/de-anonymizes all traffic:
 
 ```bash
 mcp-server-conceal \
@@ -39,49 +56,39 @@ mcp-server-conceal \
   --target-args "my-mcp-server.py"
 ```
 
-A default config is auto-created at `~/.config/mcp-server-conceal/mcp-server-conceal.toml`.
+## Quick Start
+
+### Prerequisites
+
+1. Install Ollama: [ollama.ai](https://ollama.ai)
+2. Pull model: `ollama pull qwen2.5:1.5b-instruct-q4_K_M`
+3. Verify: `curl http://localhost:11434/api/version`
+
+Config is auto-created at `~/.config/mcp-server-conceal/mcp-server-conceal.toml`.
 
 ## LLM Model Selection
 
-The LLM is used to detect PII that regex patterns miss (names, addresses, contextual data). An **instruct model** is required because the proxy sends structured prompts asking the model to identify and return PII entities in JSON format.
-
-### Recommended Models
+The LLM detects PII that regex misses (names, addresses, contextual data). An **instruct model** is required — it follows structured prompts to return PII entities as JSON.
 
 | Model | Size | Best for |
 |-------|------|----------|
-| `qwen2.5:1.5b-instruct-q4_K_M` | ~1GB | Low storage, fast, good for structured PII |
+| `qwen2.5:1.5b-instruct-q4_K_M` | ~1GB | Low storage, good for structured PII |
 | `qwen2.5:3b-instruct-q4_K_M` | ~2GB | Better name/address detection |
-| `llama3.2:3b` | ~2GB | Well-rounded, original default |
-| `phi-4-mini` | ~2.5GB | Strong reasoning at small size |
+| `llama3.2:3b` | ~2GB | Well-rounded |
 
-**Why instruct models?** The proxy sends prompts like "identify PII entities in this text and return them as JSON." Instruct-tuned models reliably follow this format. Base/pretrained models may not produce structured output.
-
-**When the LLM matters:** Regex already catches emails, phones, SSNs, credit cards, and IPs with zero latency. The LLM only handles what regex can't — primarily **names and unstructured contextual PII**. If your data is mostly structured, the 1.5B model is sufficient.
-
-Configure in `mcp-server-conceal.toml`:
-
-```toml
-[llm]
-model = "qwen2.5:1.5b-instruct-q4_K_M"
-endpoint = "http://localhost:11434"
-```
-
-## De-anonymization
-
-Responses from the AI are automatically de-anonymized. The proxy maintains a reverse mapping database (fake → real) and replaces fake values in AI responses with the originals before showing them to you.
-
-This means:
-- The AI only ever sees fake PII
-- You always see real values in responses
-- The mapping is stored locally in SQLite (`~/.local/share/mcp-server-conceal/mappings.db`)
+**When the LLM matters:** Regex catches emails, phones, SSNs, credit cards, and IPs instantly. The LLM only adds value for **names and unstructured contextual PII**.
 
 ## Detection Modes
 
 | Mode | Latency | Accuracy | Configure |
 |------|---------|----------|-----------|
-| `regex_llm` (default) | 100-500ms | High | Regex first, LLM for remainder |
+| `regex_llm` (default) | 5-60s | High | Regex first, LLM for remainder |
 | `regex` | <10ms | Good for structured PII | Pattern matching only |
-| `llm` | 200-1000ms | Best for unstructured text | AI-only detection |
+| `llm` | 5-60s | Best for unstructured text | AI-only detection |
+
+## De-anonymization
+
+The mapping database stores fake→real pairs. When you call `privacy_deanonymize`, it replaces fake values with originals. Consistent mapping ensures the same real PII always maps to the same fake.
 
 ## Building from Source
 
@@ -97,28 +104,11 @@ Requires Rust 1.85+. Binary: `target/release/mcp-server-conceal`
 
 See `mcp-server-conceal.example.toml` for all options.
 
-## Claude Desktop / MCP Client Integration
-
-```json
-{
-  "mcpServers": {
-    "database": {
-      "command": "mcp-server-conceal",
-      "args": [
-        "--target-command", "python3",
-        "--target-args", "database-server.py --host localhost",
-        "--config", "/path/to/mcp-server-conceal.toml"
-      ]
-    }
-  }
-}
-```
-
 ## Security
 
-- **Mapping database** contains real-to-fake mappings. Secure with file permissions.
 - **Reverse mappings** contain plaintext originals. Protect `~/.local/share/mcp-server-conceal/`.
 - **LLM runs locally** via Ollama — no data leaves your machine.
+- **Forward mappings** store hashes of originals (not plaintext).
 
 ## License
 
@@ -126,4 +116,4 @@ MIT License - see LICENSE file for details.
 
 ## Credits
 
-Originally created by [Gianluca Brigandi](https://github.com/gbrigandi/mcp-server-conceal). This fork adds de-anonymization support and switches to a smaller default LLM model.
+Originally created by [Gianluca Brigandi](https://github.com/gbrigandi/mcp-server-conceal). This fork adds standalone MCP server mode, de-anonymization, and a smaller default LLM model.
