@@ -1,0 +1,39 @@
+# MCP Server Conceal - Configuration
+# Default model: qwen2.5:1.5b-instruct-q4_K_M (~1GB, fast, good PII detection)
+# Pull with: ollama pull qwen2.5:1.5b-instruct-q4_K_M
+
+[detection]
+mode = "regex_llm"    # regex, llm, or regex_llm (default)
+enabled = true
+confidence_threshold = 0.8
+
+[detection.patterns]
+email = "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+phone = "\\b(?:\\+?1[-\\.\\s]?)?(?:\\(?[0-9]{3}\\)?[-\\.\\s]?)?[0-9]{3}[-\\.\\s]?[0-9]{4}\\b"
+ssn = "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+credit_card = "\\b\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b"
+ip_address = "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b"
+url = "https?://[^\\s/$.?#].[^\\s]*"
+
+[faker]
+locale = "en_US"
+seed = 12345
+consistency = true
+
+[mapping]
+database_path = "mappings.db"
+retention_days = 90
+
+[deanonymize]
+enabled = true        # Enable de-anonymization of AI responses
+
+[llm]
+model = "qwen2.5:1.5b-instruct-q4_K_M"
+endpoint = "http://localhost:11434"
+timeout_seconds = 60
+prompt_template = "default"
+
+[llm_cache]
+enabled = true
+database_path = "llm_cache.db"
+max_text_length = 2000
