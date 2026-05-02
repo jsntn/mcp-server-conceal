@@ -20,20 +20,32 @@ sequenceDiagram
 
 ## Two Modes
 
-### Standalone MCP Server (recommended for MCP clients)
+### Standalone MCP Server
 
-Exposes privacy tools directly:
+Exposes privacy tools directly. You decide what to anonymize.
 
 ```bash
 mcp-server-conceal --mode server --keep-database
 ```
 
-**Tools exposed:**
-- `privacy_anonymize(text)` — detect and replace PII with fake values
-- `privacy_deanonymize(text)` — restore original values from fakes
-- `privacy_status` — show mapping statistics
+**Arguments:**
 
-**MCP client config (e.g., kiro-cli, Claude Desktop):**
+| Arg | Description |
+|-----|-------------|
+| `--mode server` | Run as standalone MCP server (required) |
+| `--keep-database` | Preserve mappings across restarts (recommended) |
+| `--config <path>` | Custom config file path (optional, auto-created if omitted) |
+| `--log-level <level>` | Log verbosity: error, warn, info, debug, trace (default: info) |
+
+**Tools exposed:**
+
+| Tool | Description |
+|------|-------------|
+| `privacy_anonymize(text)` | Detect and replace PII with consistent fake values |
+| `privacy_deanonymize(text)` | Restore original values from previously anonymized text |
+| `privacy_status` | Show mapping count and entity type breakdown |
+
+**MCP client config:**
 
 ```json
 {
@@ -46,15 +58,59 @@ mcp-server-conceal --mode server --keep-database
 }
 ```
 
-### Proxy Mode (wraps another MCP server)
+### Proxy Mode
 
-Transparently anonymizes/de-anonymizes all traffic:
+Wraps another MCP server. Automatically anonymizes PII in requests sent to the target server and de-anonymizes responses coming back. No manual tool calls needed — all traffic is processed transparently.
 
 ```bash
 mcp-server-conceal \
   --target-command python3 \
-  --target-args "my-mcp-server.py"
+  --target-args "my-mcp-server.py" \
+  --keep-database
 ```
+
+**Arguments:**
+
+| Arg | Description |
+|-----|-------------|
+| `--target-command <cmd>` | Command to launch the target MCP server (required) |
+| `--target-args <args>` | Arguments for the target server (space-separated, supports quotes) |
+| `--target-env <KEY=VALUE>` | Environment variables for the target (repeatable) |
+| `--target-cwd <path>` | Working directory for the target server |
+| `--keep-database` | Preserve mappings across restarts |
+| `--config <path>` | Custom config file path |
+| `--log-level <level>` | Log verbosity (default: info) |
+
+**How it works:**
+
+```
+MCP Client ←stdio→ mcp-server-conceal ←stdio→ Target MCP Server
+                         │
+                    Anonymize requests (PII → fake)
+                    De-anonymize responses (fake → real)
+```
+
+**Example — wrap a database MCP server for Claude Desktop:**
+
+```json
+{
+  "mcpServers": {
+    "database": {
+      "command": "mcp-server-conceal",
+      "args": [
+        "--target-command", "python3",
+        "--target-args", "database-server.py --host localhost",
+        "--keep-database"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql://localhost/mydb"
+      }
+    }
+  }
+}
+```
+
+In this setup, any PII in tool responses from the database server is anonymized before reaching the AI, and any fake values the AI uses in subsequent requests are de-anonymized before reaching the database server.
 
 ## Quick Start
 
@@ -88,7 +144,10 @@ The LLM detects PII that regex misses (names, addresses, contextual data). An **
 
 ## De-anonymization
 
-The mapping database stores fake→real pairs. When you call `privacy_deanonymize`, it replaces fake values with originals. Consistent mapping ensures the same real PII always maps to the same fake.
+The mapping database stores fake→real pairs. Consistent mapping ensures the same real PII always maps to the same fake value across sessions (when using `--keep-database`).
+
+- **Forward table:** stores hash(original) → fake (for consistency)
+- **Reverse table:** stores fake → original (for de-anonymization)
 
 ## Building from Source
 
@@ -103,6 +162,8 @@ Requires Rust 1.85+. Binary: `target/release/mcp-server-conceal`
 ## Configuration
 
 See `mcp-server-conceal.example.toml` for all options.
+
+Custom LLM prompts can be placed at `~/.local/share/mcp-server-conceal/prompts/default.md`.
 
 ## Security
 
