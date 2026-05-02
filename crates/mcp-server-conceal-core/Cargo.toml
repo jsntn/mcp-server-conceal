@@ -16,7 +16,6 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-rmcp = { workspace = true }
 shell-words = { workspace = true }
 fake = { workspace = true }
 regex = { workspace = true }
