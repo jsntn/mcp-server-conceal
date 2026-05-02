@@ -457,8 +457,12 @@ fn is_jsonrpc_protocol_message(json_value: &Value) -> bool {
             return true;
         }
         
-        // JSON-RPC requests - skip PII processing
+        // JSON-RPC requests - skip PII processing for protocol methods, but process tools/call
         if obj.contains_key("method") && obj.contains_key("id") {
+            let method = obj.get("method").and_then(|m| m.as_str()).unwrap_or("");
+            if method == "tools/call" {
+                return false; // Process for PII - contains user data
+            }
             return true;
         }
         
