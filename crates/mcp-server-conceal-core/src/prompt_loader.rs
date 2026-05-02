@@ -1,6 +1,8 @@
 /*
    Manages prompt template loading with built-in fallback and user customization.
-   Provides hybrid approach where templates can be embedded, auto-generated, or custom.
+   Supports two built-in templates selectable via config:
+   - "simple" (default): lightweight, works with 1.5B+ models
+   - "detailed": comprehensive, requires 3B+ models
 */
 
 use anyhow::Result;
@@ -8,7 +10,8 @@ use std::path::PathBuf;
 use tracing::warn;
 use crate::config::Config;
 
-const BUILTIN_PROMPT: &str = include_str!("templates/builtin_prompt.md");
+const BUILTIN_SIMPLE: &str = include_str!("templates/builtin_simple.md");
+const BUILTIN_DETAILED: &str = include_str!("templates/builtin_detailed.md");
 
 #[derive(Clone)]
 pub struct PromptLoader {
@@ -23,24 +26,21 @@ impl PromptLoader {
         
         std::fs::create_dir_all(&prompts_dir)?;
         
-        let default_prompt_path = prompts_dir.join("default.md");
-        if !default_prompt_path.exists() {
-            std::fs::write(&default_prompt_path, BUILTIN_PROMPT)?;
-        }
-        
         Ok(Self { prompts_dir })
     }
     
     pub fn load_prompt(&self, template_name: Option<&String>) -> Result<String> {
-        match template_name {
-            None => Ok(BUILTIN_PROMPT.to_string()),
+        match template_name.map(|s| s.as_str()) {
+            None | Some("simple") => Ok(BUILTIN_SIMPLE.to_string()),
+            Some("detailed") => Ok(BUILTIN_DETAILED.to_string()),
             Some(name) => {
+                // Try loading from user prompts directory
                 let prompt_path = self.prompts_dir.join(format!("{}.md", name));
                 match std::fs::read_to_string(&prompt_path) {
                     Ok(content) => Ok(content),
                     Err(_) => {
-                        warn!("Prompt template '{}' not found, using built-in", name);
-                        Ok(BUILTIN_PROMPT.to_string())
+                        warn!("Prompt template '{}' not found, using built-in simple", name);
+                        Ok(BUILTIN_SIMPLE.to_string())
                     }
                 }
             }
@@ -55,42 +55,35 @@ impl PromptLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Config;
 
     #[test]
-    fn test_builtin_prompt_loading() {
+    fn test_builtin_simple_prompt() {
         let loader = PromptLoader::new().unwrap();
         let prompt = loader.load_prompt(None).unwrap();
         
         assert!(prompt.contains("person_name"));
-        assert!(prompt.contains("hostname"));
-        assert!(prompt.contains("node_name"));
-        assert!(prompt.contains("Built-in PII Detection Prompt"));
-        println!("✓ Built-in prompt loaded: {} chars", prompt.len());
+        assert!(prompt.contains("PII detector"));
+        assert!(!prompt.contains("hostname"));
     }
 
     #[test]
-    fn test_default_prompt_creation() {
+    fn test_builtin_simple_explicit() {
         let loader = PromptLoader::new().unwrap();
-        let prompt = loader.load_prompt(Some(&"default".to_string())).unwrap();
+        let prompt = loader.load_prompt(Some(&"simple".to_string())).unwrap();
+        
+        assert!(prompt.contains("PII detector"));
+        assert!(!prompt.contains("hostname"));
+    }
+
+    #[test]
+    fn test_builtin_detailed_prompt() {
+        let loader = PromptLoader::new().unwrap();
+        let prompt = loader.load_prompt(Some(&"detailed".to_string())).unwrap();
         
         assert!(prompt.contains("person_name"));
         assert!(prompt.contains("hostname"));
-        println!("✓ Default prompt loaded: {} chars", prompt.len());
-    }
-
-    #[test]
-    fn test_custom_prompt_loading() {
-        let loader = PromptLoader::new().unwrap();
-        let prompt = loader.load_prompt(Some(&"custom".to_string())).unwrap();
-        
-        if prompt.contains("Custom PII Detection Template") {
-            println!("✓ Custom prompt loaded: {} chars", prompt.len());
-            assert!(prompt.contains("simplified detection for testing"));
-        } else {
-            println!("✓ Custom prompt not found, fell back to built-in");
-            assert!(prompt.contains("Built-in PII Detection Prompt"));
-        }
+        assert!(prompt.contains("node_name"));
+        assert!(prompt.contains("Wazuh"));
     }
 
     #[test]
@@ -98,8 +91,7 @@ mod tests {
         let loader = PromptLoader::new().unwrap();
         let prompt = loader.load_prompt(Some(&"nonexistent123".to_string())).unwrap();
         
-        assert!(prompt.contains("Built-in PII Detection Prompt"));
-        println!("✓ Nonexistent prompt fell back to built-in");
+        assert!(prompt.contains("PII detector"));
     }
 
     #[test]
@@ -109,20 +101,5 @@ mod tests {
         let formatted = loader.format_prompt(template, "test@example.com");
         
         assert_eq!(formatted, "TEXT: \"test@example.com\" - END");
-        println!("✓ Prompt formatting works correctly");
-    }
-
-    #[test]
-    fn test_data_directory_creation() {
-        let dirs = Config::get_app_dirs().unwrap();
-        let prompts_dir = dirs.data_dir().join("prompts");
-        
-        assert!(prompts_dir.exists());
-        println!("✓ Prompts directory exists: {}", prompts_dir.display());
-        
-        let default_path = prompts_dir.join("default.md");
-        if default_path.exists() {
-            println!("✓ default.md exists");
-        }
     }
 }
