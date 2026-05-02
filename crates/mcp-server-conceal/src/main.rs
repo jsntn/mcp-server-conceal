@@ -9,8 +9,11 @@ use tracing::{info, warn};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    #[arg(long, help = "Command to execute for the target MCP server")]
-    pub target_command: String,
+    #[arg(long, default_value = "proxy", help = "Run mode: 'proxy' wraps a target MCP server, 'server' runs as standalone MCP server")]
+    pub mode: String,
+
+    #[arg(long, required_if_eq("mode", "proxy"), help = "Command to execute for the target MCP server")]
+    pub target_command: Option<String>,
 
     #[arg(long, help = "Arguments for the target MCP server (space-separated)")]
     pub target_args: Option<String>,
@@ -74,9 +77,7 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    info!("Starting mcp-server-conceal proxy");
-    info!("Target command: {}", args.target_command);
-    info!("Target args: {:?}", args.parse_target_args());
+    info!("Starting mcp-server-conceal v0.2.0 (mode: {})", args.mode);
     
     let target_env = args.parse_target_env()?;
     info!("Target environment variables: {} entries", target_env.len());
@@ -139,17 +140,27 @@ async fn main() -> Result<()> {
             timeout_seconds: 30,
         });
 
-    let proxy_config = mcp_server_conceal_core::IntegratedProxyConfig {
-        target_command: args.target_command.clone(),
-        target_args: args.parse_target_args(),
-        target_env,
-        target_cwd: args.target_cwd.clone(),
-        config,
-        ollama_config,
-    };
+    if args.mode == "server" {
+        info!("Running in standalone MCP server mode");
+        let mut server = mcp_server_conceal_core::server::McpServer::new(config, ollama_config)?;
+        server.run().await
+    } else {
+        let target_command = args.target_command.clone().unwrap_or_default();
+        info!("Target command: {}", target_command);
+        info!("Target args: {:?}", args.parse_target_args());
 
-    let mut proxy = mcp_server_conceal_core::IntegratedProxy::new(proxy_config)?;
-    proxy.run().await
+        let proxy_config = mcp_server_conceal_core::IntegratedProxyConfig {
+            target_command,
+            target_args: args.parse_target_args(),
+            target_env,
+            target_cwd: args.target_cwd.clone(),
+            config,
+            ollama_config,
+        };
+
+        let mut proxy = mcp_server_conceal_core::IntegratedProxy::new(proxy_config)?;
+        proxy.run().await
+    }
 }
 
 #[cfg(test)]
@@ -158,7 +169,8 @@ mod tests {
 
     fn create_test_args() -> Args {
         Args {
-            target_command: "python".to_string(),
+            mode: "proxy".to_string(),
+            target_command: Some("python".to_string()),
             target_args: None,
             target_env: vec![],
             target_cwd: None,
