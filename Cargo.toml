@@ -9,9 +9,9 @@ resolver = "2"
 edition = "2021"
 authors = ["Gianluca Brigandi <gbrigand@gmail.com>"]
 description = "An MCP proxy that pseudo-anonymizes PII before data reaches external AI providers like Claude, ChatGPT, or Gemini"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
-repository = "https://github.com/gbrigandi/mcp-server-conceal"
+repository = "https://github.com/jsntn/mcp-server-conceal"
 
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["full"] }
@@ -21,7 +21,6 @@ serde_json = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rmcp = { version = "0.3.0", features = ["server"] }
 shell-words = "1.1"
 fake = { version = "2.9", features = ["derive"] }
 regex = "1.10"
