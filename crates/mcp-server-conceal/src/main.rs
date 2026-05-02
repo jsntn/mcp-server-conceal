@@ -91,7 +91,6 @@ async fn main() -> Result<()> {
             mcp_server_conceal_core::Config::from_file(config_path)?
         }
         None => {
-            // Try to load from default location, fallback to default config
             match mcp_server_conceal_core::Config::get_default_config_path() {
                 Ok(default_path) if default_path.exists() => {
                     info!("Loading configuration from default location: {}", default_path.display());
@@ -117,7 +116,6 @@ async fn main() -> Result<()> {
     config.validate()?;
     info!("Configuration validated successfully");
 
-    // Remove database by default unless --keep-database is specified
     if !args.keep_database {
         if config.mapping.database_path.exists() {
             info!("Removing existing database to start fresh (use --keep-database to preserve mappings)");
@@ -127,7 +125,6 @@ async fn main() -> Result<()> {
         info!("Keeping existing database mappings");
     }
 
-    // Default to enabled for backward compatibility if no LLM config
     let ollama_config = config.llm.as_ref()
         .map(|llm| mcp_server_conceal_core::OllamaConfig {
             enabled: llm.enabled,
@@ -138,7 +135,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| mcp_server_conceal_core::OllamaConfig {
             enabled: true,
             endpoint: "http://localhost:11434".to_string(),
-            model: "llama3.2:3b".to_string(),
+            model: "qwen2.5:1.5b-instruct-q4_K_M".to_string(),
             timeout_seconds: 30,
         });
 

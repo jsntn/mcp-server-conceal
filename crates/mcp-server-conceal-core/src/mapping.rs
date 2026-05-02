@@ -342,6 +342,45 @@ impl MappingStore {
         value.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
+
+    /// Initialize the reverse_mappings table for de-anonymization.
+    pub fn initialize_reverse_schema(&self) -> Result<()> {
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS reverse_mappings (
+                fake_value TEXT PRIMARY KEY,
+                original_value TEXT NOT NULL
+            )",
+            [],
+        )?;
+        debug!("Reverse mappings schema initialized");
+        Ok(())
+    }
+
+    /// Store a reverse mapping (fake → original) for de-anonymization.
+    pub fn store_reverse_mapping(&mut self, fake_value: &str, original_value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO reverse_mappings (fake_value, original_value)
+             VALUES (?1, ?2)",
+            params![fake_value, original_value],
+        )?;
+        debug!("Stored reverse mapping: {} -> [REDACTED]", fake_value);
+        Ok(())
+    }
+
+    /// Get all reverse mappings as (fake_value, original_value) pairs.
+    pub fn get_all_reverse_entries(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT fake_value, original_value FROM reverse_mappings"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
 }
 
 #[derive(Debug)]

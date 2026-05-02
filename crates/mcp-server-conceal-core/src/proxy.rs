@@ -10,6 +10,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::config::{Config, DetectedEntity, AnonymizedEntity, DetectionMode};
+use crate::bootstrap::init_deanonymize;
+use crate::deanonymize::deanonymize_text;
 use crate::detection::RegexDetectionEngine;
 use crate::faker::FakerEngine;
 use crate::mapping::MappingStore;
@@ -38,6 +40,7 @@ impl IntegratedProxy {
         let detection_engine = RegexDetectionEngine::new(&config.config.detection)?;
         let faker_engine = FakerEngine::new(&config.config.faker);
         let mapping_store = MappingStore::new(config.config.mapping.clone())?;
+        init_deanonymize(&mapping_store)?;
         let ollama_client = OllamaClient::new(config.ollama_config.clone(), config.config.llm.as_ref().and_then(|llm| llm.prompt_template.as_ref()))?;
 
         Ok(Self {
@@ -295,12 +298,12 @@ async fn process_stdin_loop(
 async fn process_stdout_loop(
     child_stdout: tokio::process::ChildStdout,
     our_stdout: &mut tokio::io::Stdout,
-    detection_engine: &mut RegexDetectionEngine,
-    ollama_client: &OllamaClient,
-    faker_engine: &mut FakerEngine,
+    _detection_engine: &mut RegexDetectionEngine,
+    _ollama_client: &OllamaClient,
+    _faker_engine: &mut FakerEngine,
     mapping_store: &mut MappingStore,
-    model_name: &str,
-    detection_mode: &DetectionMode,
+    _model_name: &str,
+    _detection_mode: &DetectionMode,
     shutdown_tx: &mpsc::UnboundedSender<()>,
 ) -> Result<()> {
     let mut reader = BufReader::new(child_stdout);
@@ -315,20 +318,20 @@ async fn process_stdout_loop(
                 break;
             }
             Ok(_) => {
-                if let Err(e) = process_and_forward_line(
-                    &line,
-                    our_stdout,
-                    detection_engine,
-                    ollama_client,
-                    faker_engine,
-                    mapping_store,
-                    model_name,
-                    detection_mode,
-                    "response"
-                ).await {
-                    error!("Failed to process stdout line: {}", e);
-                    shutdown_tx.send(()).ok();
-                    break;
+                let original_line = line.trim();
+                match deanonymize_text(original_line, mapping_store) {
+                    Ok(restored_line) => {
+                        if restored_line != original_line {
+                            info!("De-anonymized response");
+                        }
+                        our_stdout.write_all((restored_line + "\n").as_bytes()).await?;
+                        our_stdout.flush().await?;
+                    }
+                    Err(e) => {
+                        warn!("De-anonymization failed, forwarding as-is: {}", e);
+                        our_stdout.write_all(line.as_bytes()).await?;
+                        our_stdout.flush().await?;
+                    }
                 }
             }
             Err(e) => {
@@ -454,8 +457,12 @@ fn is_jsonrpc_protocol_message(json_value: &Value) -> bool {
             return true;
         }
         
-        // JSON-RPC requests - skip PII processing
+        // JSON-RPC requests - skip PII processing for protocol methods, but process tools/call
         if obj.contains_key("method") && obj.contains_key("id") {
+            let method = obj.get("method").and_then(|m| m.as_str()).unwrap_or("");
+            if method == "tools/call" {
+                return false; // Process for PII - contains user data
+            }
             return true;
         }
         
@@ -611,6 +618,7 @@ async fn create_anonymized_entities(
     
     for entity in entities {
         let anonymized = if let Some(existing_fake) = mapping_store.get_mapping(&entity.entity_type, &entity.original_value)? {
+            mapping_store.store_reverse_mapping(&existing_fake, &entity.original_value)?;
             AnonymizedEntity {
                 entity_type: entity.entity_type,
                 original_value: entity.original_value,
@@ -620,6 +628,7 @@ async fn create_anonymized_entities(
         } else {
             let anonymized = faker_engine.anonymize_entity(&entity)?;
             mapping_store.store_mapping(&anonymized)?;
+            mapping_store.store_reverse_mapping(&anonymized.fake_value, &anonymized.original_value)?;
             anonymized
         };
         anonymized_entities.push(anonymized);
