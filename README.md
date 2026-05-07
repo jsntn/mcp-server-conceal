@@ -116,8 +116,27 @@ In this setup, any PII in tool responses from the database server is anonymized 
 
 ### Option A: NER Detection (Recommended)
 
-1. Install NER service: `pip install gliner fastapi uvicorn`
-2. Start service: `python3 ner_service.py`
+1. Download the ONNX model (~412MB, one-time):
+
+```bash
+mkdir -p ~/.local/share/mcp-server-conceal/ner
+cd ~/.local/share/mcp-server-conceal/ner
+curl -L -o model.onnx "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/model.onnx"
+curl -L -o tokenizer.json "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/tokenizer.json"
+```
+
+2. Add to `~/.config/mcp-server-conceal/mcp-server-conceal.toml`:
+
+```toml
+[detection]
+mode = "regex_ner"
+
+[ner]
+model_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/model.onnx"
+tokenizer_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/tokenizer.json"
+labels = ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
+```
+
 3. Run: `mcp-server-conceal --mode server --keep-database`
 
 ### Option B: LLM Detection (Legacy)
@@ -133,41 +152,43 @@ Config is auto-created at `~/.config/mcp-server-conceal/mcp-server-conceal.toml`
 
 ### NER (Named Entity Recognition) — Recommended
 
-This branch uses a dedicated NER model ([GLiNER](https://github.com/urchade/GLiNER)) for PII detection instead of a generative LLM. NER models are purpose-built for entity recognition — faster, more accurate, and deterministic.
+This branch embeds a BERT-based NER model directly in the binary using [tract](https://github.com/sonos/tract) (pure Rust ONNX runtime). No Python, no external services — single self-contained binary.
 
-| | NER (GLiNER) | LLM (Ollama) |
+| | NER (embedded ONNX) | LLM (Ollama) |
 |---|---|---|
-| **Speed** | ~50-100ms | 5-60s |
-| **Accuracy** | High — catches names, addresses, DOBs, orgs | Misses contextual PII |
+| **Speed** | ~1s per call | 5-60s |
+| **Accuracy** | High — catches names, locations, orgs | Misses contextual PII |
 | **Consistency** | Deterministic | Non-deterministic |
-| **Resource usage** | ~500MB RAM | ~1-2GB RAM |
+| **Resource usage** | ~500MB (model in memory) | ~1-2GB RAM |
+| **Dependencies** | None (single binary + model file) | Ollama running |
 | **False positives** | Very low | Can hallucinate |
+
+The default model (`dslim/bert-base-NER`) detects: persons, locations, organizations, and miscellaneous entities.
 
 #### NER Setup
 
-1. Install the NER service:
+1. Download the ONNX model and tokenizer from Hugging Face (one-time, ~412MB):
 
 ```bash
-pip install gliner fastapi uvicorn
+mkdir -p ~/.local/share/mcp-server-conceal/ner
+cd ~/.local/share/mcp-server-conceal/ner
+curl -L -o model.onnx "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/model.onnx"
+curl -L -o tokenizer.json "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/tokenizer.json"
 ```
 
-2. Start the service:
-
-```bash
-python3 ner_service.py
-# Runs on http://localhost:8089
-```
-
-3. Configure in `mcp-server-conceal.toml`:
+2. Configure in `mcp-server-conceal.toml`:
 
 ```toml
 [detection]
 mode = "regex_ner"
 
 [ner]
-endpoint = "http://localhost:8089"
-labels = ["person", "email", "phone", "address", "date_of_birth", "organization", "credit_card", "ssn"]
+model_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/model.onnx"
+tokenizer_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/tokenizer.json"
+labels = ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
 ```
+
+Any ONNX token-classification model with BIO tagging can be used — just update the model path and labels list.
 
 ### LLM (Ollama) — Legacy
 
@@ -183,7 +204,7 @@ The LLM approach uses a generative model to detect PII via prompting. Still supp
 
 | Mode | Latency | Accuracy | Configure |
 |------|---------|----------|-----------|
-| `regex_ner` | <200ms | Best | Regex first, NER for remainder |
+| `regex_ner` | ~1s | Best | Regex first, NER for remainder |
 | `regex_llm` | 5-60s | Good | Regex first, LLM for remainder |
 | `regex` | <10ms | Good for structured PII | Pattern matching only |
 | `llm` | 5-60s | Moderate | AI-only detection (legacy) |

@@ -11,6 +11,7 @@ use crate::deanonymize::deanonymize_text;
 use crate::detection::RegexDetectionEngine;
 use crate::faker::FakerEngine;
 use crate::mapping::MappingStore;
+use crate::ner::NerEngine;
 use crate::ollama::{OllamaClient, OllamaConfig};
 
 pub struct McpServer {
@@ -18,6 +19,7 @@ pub struct McpServer {
     faker_engine: FakerEngine,
     mapping_store: MappingStore,
     ollama_client: OllamaClient,
+    ner_client: Option<NerEngine>,
     detection_mode: DetectionMode,
     model_name: String,
 }
@@ -29,10 +31,11 @@ impl McpServer {
         let mapping_store = MappingStore::new(config.mapping.clone())?;
         init_deanonymize(&mapping_store)?;
         let ollama_client = OllamaClient::new(ollama_config.clone(), config.llm.as_ref().and_then(|l| l.prompt_template.as_ref()))?;
+        let ner_client = config.ner.as_ref().map(|c| NerEngine::new(c)).transpose()?;
         let detection_mode = config.detection.mode.clone();
         let model_name = ollama_config.model.clone();
 
-        Ok(Self { detection_engine, faker_engine, mapping_store, ollama_client, detection_mode, model_name })
+        Ok(Self { detection_engine, faker_engine, mapping_store, ollama_client, ner_client, detection_mode, model_name })
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -192,6 +195,21 @@ impl McpServer {
                         let llm_ents = self.ollama_client.extract_entities(text).await.unwrap_or_default();
                         self.mapping_store.store_llm_cache(text, &llm_ents, &self.model_name)?;
                         regex_ents.extend(llm_ents);
+                    }
+                }
+                regex_ents
+            }
+            DetectionMode::RegexNer => {
+                let mut regex_ents = self.detection_engine.detect_in_text(text);
+                if let Some(ref ner) = self.ner_client {
+                    match ner.detect_entities(text) {
+                        Ok(ner_ents) => {
+                            debug!("NER returned {} entities", ner_ents.len());
+                            regex_ents.extend(ner_ents);
+                        }
+                        Err(e) => {
+                            error!("NER detection failed: {}", e);
+                        }
                     }
                 }
                 regex_ents

@@ -570,6 +570,10 @@ async fn process_text_through_pipeline(
             let llm_entities = get_llm_entities(text, ollama_client, mapping_store, model_name).await?;
             combine_entities(regex_entities, llm_entities)
         }
+        DetectionMode::RegexNer => {
+            // NER mode in proxy falls back to regex-only (NER is server-mode only for now)
+            detection_engine.detect_in_text(text)
+        }
     };
     
     if combined_entities.is_empty() {

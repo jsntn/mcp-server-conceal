@@ -12,6 +12,7 @@ pub struct Config {
     pub faker: FakerConfig,
     pub mapping: MappingConfig,
     pub llm: Option<LlmConfig>,
+    pub ner: Option<NerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +30,8 @@ pub enum DetectionMode {
     Llm,
     #[serde(rename = "regex_llm")]
     RegexLlm,
+    #[serde(rename = "regex_ner")]
+    RegexNer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +55,13 @@ pub struct LlmConfig {
     pub endpoint: String,
     pub timeout_seconds: u64,
     pub prompt_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NerConfig {
+    pub model_path: String,
+    pub tokenizer_path: String,
+    pub labels: Vec<String>,
 }
 
 impl Default for Config {
@@ -87,6 +97,7 @@ impl Default for Config {
                 timeout_seconds: 300,
                 prompt_template: None,
             }),
+            ner: None,
         }
     }
 }
