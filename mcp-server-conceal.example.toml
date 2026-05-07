@@ -35,6 +35,19 @@ retention_days = 90
 [ner]
 model_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/model.onnx"
 tokenizer_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/tokenizer.json"
+# Labels define what types of entities the NER model can detect.
+# This must match the model's training — do not change unless using a different model.
+# The model reads each word and assigns one of these labels:
+#   O      = ordinary word, not an entity (ignored)
+#   B-PER  = beginning of a person name     → replaced with a fake name
+#   I-PER  = continuation of a person name   → (part of the same name)
+#   B-ORG  = beginning of an organization    → redacted
+#   I-ORG  = continuation of an organization → (part of the same org)
+#   B-LOC  = beginning of a location         → redacted
+#   I-LOC  = continuation of a location      → (part of the same location)
+#   B-MISC = beginning of a misc entity      → redacted
+#   I-MISC = continuation of a misc entity   → (part of the same entity)
+# "B-" means the first word of an entity, "I-" means a following word in the same entity.
 labels = ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
 
 # --- LLM detection (legacy) ---

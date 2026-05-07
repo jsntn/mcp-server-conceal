@@ -185,6 +185,17 @@ mode = "regex_ner"
 [ner]
 model_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/model.onnx"
 tokenizer_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/tokenizer.json"
+# Labels must match the model's output. Each word gets one label:
+#   O      = not an entity (ignored)
+#   B-PER  = beginning of a person name     → replaced with fake name
+#   I-PER  = continuation of a person name
+#   B-ORG  = beginning of an organization   → redacted
+#   I-ORG  = continuation of an organization
+#   B-LOC  = beginning of a location        → redacted
+#   I-LOC  = continuation of a location
+#   B-MISC = beginning of a misc entity     → redacted
+#   I-MISC = continuation of a misc entity
+# "B-" = first word, "I-" = following words of the same entity.
 labels = ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
 ```
 
