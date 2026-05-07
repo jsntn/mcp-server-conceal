@@ -114,17 +114,64 @@ In this setup, any PII in tool responses from the database server is anonymized 
 
 ## Quick Start
 
-### Prerequisites
+### Option A: NER Detection (Recommended)
+
+1. Install NER service: `pip install gliner fastapi uvicorn`
+2. Start service: `python3 ner_service.py`
+3. Run: `mcp-server-conceal --mode server --keep-database`
+
+### Option B: LLM Detection (Legacy)
 
 1. Install Ollama: [ollama.ai](https://ollama.ai)
 2. Pull model: `ollama pull qwen2.5:1.5b-instruct-q4_K_M`
 3. Verify: `curl http://localhost:11434/api/version`
+4. Run: `mcp-server-conceal --mode server --keep-database`
 
 Config is auto-created at `~/.config/mcp-server-conceal/mcp-server-conceal.toml`.
 
-## LLM Model Selection
+## Detection Backends
 
-The LLM detects PII that regex misses (names, addresses, contextual data). An **instruct model** is required — it follows structured prompts to return PII entities as JSON.
+### NER (Named Entity Recognition) — Recommended
+
+This branch uses a dedicated NER model ([GLiNER](https://github.com/urchade/GLiNER)) for PII detection instead of a generative LLM. NER models are purpose-built for entity recognition — faster, more accurate, and deterministic.
+
+| | NER (GLiNER) | LLM (Ollama) |
+|---|---|---|
+| **Speed** | ~50-100ms | 5-60s |
+| **Accuracy** | High — catches names, addresses, DOBs, orgs | Misses contextual PII |
+| **Consistency** | Deterministic | Non-deterministic |
+| **Resource usage** | ~500MB RAM | ~1-2GB RAM |
+| **False positives** | Very low | Can hallucinate |
+
+#### NER Setup
+
+1. Install the NER service:
+
+```bash
+pip install gliner fastapi uvicorn
+```
+
+2. Start the service:
+
+```bash
+python3 ner_service.py
+# Runs on http://localhost:8089
+```
+
+3. Configure in `mcp-server-conceal.toml`:
+
+```toml
+[detection]
+mode = "regex_ner"
+
+[ner]
+endpoint = "http://localhost:8089"
+labels = ["person", "email", "phone", "address", "date_of_birth", "organization", "credit_card", "ssn"]
+```
+
+### LLM (Ollama) — Legacy
+
+The LLM approach uses a generative model to detect PII via prompting. Still supported but not recommended for production use.
 
 | Model | Size | Best for |
 |-------|------|----------|
@@ -132,15 +179,14 @@ The LLM detects PII that regex misses (names, addresses, contextual data). An **
 | `qwen2.5:3b-instruct-q4_K_M` | ~2GB | Better name/address detection |
 | `llama3.2:3b` | ~2GB | Well-rounded |
 
-**When the LLM matters:** Regex catches emails, phones, SSNs, credit cards, and IPs instantly. The LLM only adds value for **names and unstructured contextual PII**.
-
 ## Detection Modes
 
 | Mode | Latency | Accuracy | Configure |
 |------|---------|----------|-----------|
-| `regex_llm` (default) | 5-60s | High | Regex first, LLM for remainder |
+| `regex_ner` | <200ms | Best | Regex first, NER for remainder |
+| `regex_llm` | 5-60s | Good | Regex first, LLM for remainder |
 | `regex` | <10ms | Good for structured PII | Pattern matching only |
-| `llm` | 5-60s | Best for unstructured text | AI-only detection |
+| `llm` | 5-60s | Moderate | AI-only detection (legacy) |
 
 ## De-anonymization
 
