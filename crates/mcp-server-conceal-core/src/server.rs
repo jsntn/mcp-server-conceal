@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, info};
 
-use crate::config::{Config, DetectionMode};
+use crate::config::{Config, DetectedEntity, DetectionMode};
 use crate::bootstrap::init_deanonymize;
 use crate::deanonymize::deanonymize_text;
 use crate::detection::RegexDetectionEngine;
@@ -140,10 +140,37 @@ impl McpServer {
         }
     }
 
-    async fn anonymize(&mut self, text: &str) -> Result<String> {
-        use crate::config::DetectedEntity;
+    /// Detect known original values from the mapping database that appear in the text.
+    fn detect_known_entities(&self, text: &str) -> Vec<DetectedEntity> {
+        let mut entities = Vec::new();
+        let reverse_entries = match self.mapping_store.get_all_reverse_entries() {
+            Ok(entries) => entries,
+            Err(_) => return entities,
+        };
 
-        let entities = match &self.detection_mode {
+        for (_fake_value, original_value) in &reverse_entries {
+            // Search for all occurrences of this known original value in the text
+            let mut start = 0;
+            while let Some(pos) = text[start..].find(original_value.as_str()) {
+                let abs_start = start + pos;
+                let abs_end = abs_start + original_value.len();
+                entities.push(DetectedEntity {
+                    entity_type: "person_name".to_string(),
+                    original_value: original_value.clone(),
+                    start: abs_start,
+                    end: abs_end,
+                    confidence: 1.0,
+                });
+                start = abs_end;
+            }
+        }
+
+        debug!("Detected {} known entities from mapping database", entities.len());
+        entities
+    }
+
+    async fn anonymize(&mut self, text: &str) -> Result<String> {
+        let mut entities = match &self.detection_mode {
             DetectionMode::Regex => self.detection_engine.detect_in_text(text),
             DetectionMode::Llm => {
                 if let Some(cached) = self.mapping_store.get_llm_cache(text, &self.model_name)? {
@@ -171,9 +198,32 @@ impl McpServer {
             }
         };
 
+        // Also detect any known original values from the mapping database.
+        // This ensures previously seen PII is always caught, even if the LLM misses it.
+        let known_ents = self.detect_known_entities(text);
+        for known in known_ents {
+            if !entities.iter().any(|e| e.original_value == known.original_value && e.start == known.start) {
+                entities.push(known);
+            }
+        }
+
         if entities.is_empty() {
             return Ok(text.to_string());
         }
+
+        // Sort by start position descending so replacements don't shift indices
+        entities.sort_by(|a, b| b.start.cmp(&a.start));
+        // Deduplicate overlapping entities (keep higher confidence)
+        entities.dedup_by(|a, b| {
+            if a.start >= b.start && a.start < b.end {
+                if a.confidence > b.confidence {
+                    std::mem::swap(a, b);
+                }
+                true
+            } else {
+                false
+            }
+        });
 
         let mut result = text.to_string();
         for entity in &entities {
@@ -186,7 +236,7 @@ impl McpServer {
                 self.mapping_store.store_reverse_mapping(&anonymized.fake_value, &anonymized.original_value)?;
                 anonymized.fake_value
             };
-            result = result.replace(&entity.original_value, &fake);
+            result = result.replacen(&entity.original_value, &fake, 1);
         }
 
         info!("Anonymized {} entities", entities.len());
