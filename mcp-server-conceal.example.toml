@@ -1,9 +1,13 @@
 # MCP Server Conceal - Configuration
-# Default model: qwen2.5:1.5b-instruct-q4_K_M (~1GB, fast, good PII detection)
-# Pull with: ollama pull qwen2.5:1.5b-instruct-q4_K_M
+#
+# Detection modes:
+#   "regex_ner" - Recommended. Regex + embedded BERT NER model (fast, accurate)
+#   "regex_llm" - Regex + Ollama LLM (slower, legacy)
+#   "regex"     - Regex only (fastest, structured PII only)
+#   "llm"       - LLM only (slowest, legacy)
 
 [detection]
-mode = "regex_llm"    # regex, llm, or regex_llm (default)
+mode = "regex_ner"    # regex, llm, regex_llm, or regex_ner (recommended)
 enabled = true
 confidence_threshold = 0.8
 
@@ -24,6 +28,17 @@ database_path = "mappings.db"
 encryption = false
 retention_days = 90
 
+# --- NER detection (recommended) ---
+# Uses an embedded ONNX model via tract (pure Rust, no Python needed).
+# Download model: curl -L -o model.onnx "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/model.onnx"
+# Download tokenizer: curl -L -o tokenizer.json "https://huggingface.co/dslim/bert-base-NER/resolve/main/onnx/tokenizer.json"
+[ner]
+model_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/model.onnx"
+tokenizer_path = "/home/YOUR_USER/.local/share/mcp-server-conceal/ner/tokenizer.json"
+labels = ["O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
+
+# --- LLM detection (legacy) ---
+# Requires Ollama running locally: ollama pull qwen2.5:1.5b-instruct-q4_K_M
 [llm]
 enabled = true
 model = "qwen2.5:1.5b-instruct-q4_K_M"

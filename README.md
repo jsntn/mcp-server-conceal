@@ -228,13 +228,14 @@ Requires Rust 1.85+. Binary: `target/release/mcp-server-conceal`
 
 ## Configuration
 
-See `mcp-server-conceal.example.toml` for all options.
+See `mcp-server-conceal.example.toml` for all options, including NER model setup and LLM configuration.
 
 Custom LLM prompts can be placed at `~/.local/share/mcp-server-conceal/prompts/default.md`.
 
 ## Security
 
 - **Reverse mappings** contain plaintext originals. Protect `~/.local/share/mcp-server-conceal/`.
+- **NER model runs locally** — embedded in the binary via tract. No data leaves your machine.
 - **LLM runs locally** via Ollama — no data leaves your machine.
 - **Forward mappings** store hashes of originals (not plaintext).
 
