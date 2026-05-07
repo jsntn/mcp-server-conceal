@@ -16,10 +16,8 @@
           version = "0.2.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.pkg-config ];
+          nativeBuildInputs = [ pkgs.pkg-config pkgs.perl ];
           buildInputs = [ pkgs.openssl ];
-          # openssl-sys and rusqlite are vendored via cargo features
-          OPENSSL_NO_VENDOR = 0;
         };
       }
     );
