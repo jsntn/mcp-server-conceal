@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, info};
 
-use crate::config::{Config, DetectedEntity, DetectionMode};
+use crate::config::{Config, DetectedEntity, DetectionMode, NerConfig};
 use crate::bootstrap::init_deanonymize;
 use crate::deanonymize::deanonymize_text;
 use crate::detection::RegexDetectionEngine;
@@ -20,22 +20,36 @@ pub struct McpServer {
     mapping_store: MappingStore,
     ollama_client: OllamaClient,
     ner_client: Option<NerEngine>,
+    ner_config: Option<NerConfig>,
     detection_mode: DetectionMode,
     model_name: String,
 }
 
 impl McpServer {
+    /// Create server with deferred NER loading for fast startup.
     pub fn new(config: Config, ollama_config: OllamaConfig) -> Result<Self> {
         let detection_engine = RegexDetectionEngine::new(&config.detection)?;
         let faker_engine = FakerEngine::new(&config.faker);
         let mapping_store = MappingStore::new(config.mapping.clone())?;
         init_deanonymize(&mapping_store)?;
         let ollama_client = OllamaClient::new(ollama_config.clone(), config.llm.as_ref().and_then(|l| l.prompt_template.as_ref()))?;
-        let ner_client = config.ner.as_ref().map(|c| NerEngine::new(c)).transpose()?;
         let detection_mode = config.detection.mode.clone();
         let model_name = ollama_config.model.clone();
+        // Store NER config for lazy loading instead of loading immediately
+        let ner_config = config.ner.clone();
 
-        Ok(Self { detection_engine, faker_engine, mapping_store, ollama_client, ner_client, detection_mode, model_name })
+        Ok(Self { detection_engine, faker_engine, mapping_store, ollama_client, ner_client: None, ner_config, detection_mode, model_name })
+    }
+
+    /// Lazily initialize the NER engine on first use.
+    fn ensure_ner(&mut self) -> Result<()> {
+        if self.ner_client.is_none() {
+            if let Some(ref cfg) = self.ner_config {
+                info!("Loading NER model (lazy init)...");
+                self.ner_client = Some(NerEngine::new(cfg)?);
+            }
+        }
+        Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -54,9 +68,11 @@ impl McpServer {
                     match serde_json::from_str::<Value>(trimmed) {
                         Ok(msg) => {
                             let resp = self.handle_message(&msg).await;
-                            let out_str = serde_json::to_string(&resp)? + "\n";
-                            out.write_all(out_str.as_bytes()).await?;
-                            out.flush().await?;
+                            if resp != Value::Null {
+                                let out_str = serde_json::to_string(&resp)? + "\n";
+                                out.write_all(out_str.as_bytes()).await?;
+                                out.flush().await?;
+                            }
                         }
                         Err(e) => {
                             error!("Invalid JSON: {}", e);
@@ -77,15 +93,21 @@ impl McpServer {
         let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
         match method {
-            "initialize" => json!({
-                "jsonrpc": "2.0", "id": id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "mcp-server-conceal", "version": "0.2.0"}
-                }
-            }),
-            "notifications/initialized" => return Value::Null,
+            "initialize" => {
+                let proto = msg.get("params")
+                    .and_then(|p| p.get("protocolVersion"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("2024-11-05");
+                json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "result": {
+                        "protocolVersion": proto,
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "mcp-server-conceal", "version": "0.2.0"}
+                    }
+                })
+            }
+            "notifications/initialized" => Value::Null,
             "tools/list" => json!({
                 "jsonrpc": "2.0", "id": id,
                 "result": {"tools": [
@@ -143,7 +165,6 @@ impl McpServer {
         }
     }
 
-    /// Detect known original values from the mapping database that appear in the text.
     fn detect_known_entities(&self, text: &str) -> Vec<DetectedEntity> {
         let mut entities = Vec::new();
         let reverse_entries = match self.mapping_store.get_all_reverse_entries() {
@@ -152,7 +173,6 @@ impl McpServer {
         };
 
         for (_fake_value, original_value) in &reverse_entries {
-            // Search for all occurrences of this known original value in the text
             let mut start = 0;
             while let Some(pos) = text[start..].find(original_value.as_str()) {
                 let abs_start = start + pos;
@@ -200,6 +220,10 @@ impl McpServer {
                 regex_ents
             }
             DetectionMode::RegexNer => {
+                // Lazy-load NER on first anonymize call
+                if let Err(e) = self.ensure_ner() {
+                    error!("Failed to load NER engine: {}", e);
+                }
                 let mut regex_ents = self.detection_engine.detect_in_text(text);
                 if let Some(ref ner) = self.ner_client {
                     match ner.detect_entities(text) {
@@ -216,8 +240,6 @@ impl McpServer {
             }
         };
 
-        // Also detect any known original values from the mapping database.
-        // This ensures previously seen PII is always caught, even if the LLM misses it.
         let known_ents = self.detect_known_entities(text);
         for known in known_ents {
             if !entities.iter().any(|e| e.original_value == known.original_value && e.start == known.start) {
@@ -229,9 +251,7 @@ impl McpServer {
             return Ok(text.to_string());
         }
 
-        // Sort by start position descending so replacements don't shift indices
         entities.sort_by(|a, b| b.start.cmp(&a.start));
-        // Deduplicate overlapping entities (keep higher confidence)
         entities.dedup_by(|a, b| {
             if a.start >= b.start && a.start < b.end {
                 if a.confidence > b.confidence {
