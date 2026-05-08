@@ -638,6 +638,12 @@ async fn create_anonymized_entities(
         anonymized_entities.push(anonymized);
     }
     
+    if crate::info_mode() && !anonymized_entities.is_empty() {
+        for e in &anonymized_entities {
+            eprintln!("[CONCEAL] Anonymized: {} \"{}\" → \"{}\"", e.entity_type, e.original_value, e.fake_value);
+        }
+    }
+
     Ok(anonymized_entities)
 }
 

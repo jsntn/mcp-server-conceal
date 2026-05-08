@@ -22,6 +22,9 @@ pub fn deanonymize_text(text: &str, mapping_store: &MappingStore) -> Result<Stri
 
     for (fake_value, original_value) in &sorted_entries {
         if result.contains(fake_value.as_str()) {
+            if crate::info_mode() {
+                eprintln!("[CONCEAL] De-anonymized: \"{}\" → \"{}\"", fake_value, original_value);
+            }
             result = result.replace(fake_value.as_str(), original_value.as_str());
             replacements += 1;
         }

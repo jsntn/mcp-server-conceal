@@ -32,6 +32,9 @@ pub struct Args {
 
     #[arg(long, help = "Keep existing database mappings (by default, database is cleared on each run)")]
     pub keep_database: bool,
+
+    #[arg(long, help = "Show anonymized/de-anonymized values on stderr")]
+    pub info: bool,
 }
 
 impl Args {
@@ -64,6 +67,8 @@ impl Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    mcp_server_conceal_core::set_info_mode(args.info);
     
     let log_level = args.log_level.parse::<tracing::Level>()
         .unwrap_or_else(|_| {

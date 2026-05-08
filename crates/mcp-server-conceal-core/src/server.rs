@@ -254,6 +254,9 @@ impl McpServer {
                 self.mapping_store.store_reverse_mapping(&anonymized.fake_value, &anonymized.original_value)?;
                 anonymized.fake_value
             };
+            if crate::info_mode() {
+                eprintln!("[CONCEAL] Anonymized: {} \"{}\" → \"{}\"", entity.entity_type, entity.original_value, fake);
+            }
             result = result.replacen(&entity.original_value, &fake, 1);
         }
 

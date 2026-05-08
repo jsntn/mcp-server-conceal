@@ -1,3 +1,15 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static INFO_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_info_mode(enabled: bool) {
+    INFO_MODE.store(enabled, Ordering::Relaxed);
+}
+
+pub fn info_mode() -> bool {
+    INFO_MODE.load(Ordering::Relaxed)
+}
+
 pub mod proxy;
 pub mod bootstrap;
 pub mod config;
